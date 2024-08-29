@@ -1,24 +1,24 @@
 {
   "schemaVersion": 1,
-  "id": "addon-template",
+  "id": "meteor-seedutils",
   "version": "${version}",
-  "name": "Addon Template",
-  "description": "An addon template for Meteor Client addons.",
+  "name": "Meteor seed utils",
+  "description": "An addon to abuse world gen",
   "authors": [
-    "seasnail"
+    "FlexCoral"
   ],
   "contact": {
-    "repo": "https://github.com/MeteorDevelopment/meteor-addon-template"
+    "repo": "https://github.com/maxsupermanhd/meteor-seedutils"
   },
-  "icon": "assets/template/icon.png",
+  "icon": "assets/seedutils/icon.png",
   "environment": "client",
   "entrypoints": {
     "meteor": [
-      "com.example.addon.AddonTemplate"
+      "flexcoral.seedutils.SeedUtilsAddon"
     ]
   },
   "mixins": [
-    "addon-template.mixins.json"
+    "seedutils.mixins.json"
   ],
   "custom": {
     "meteor-client:color": "225,25,25"
