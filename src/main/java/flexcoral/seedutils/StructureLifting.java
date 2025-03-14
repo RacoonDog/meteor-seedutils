@@ -1,49 +1,76 @@
 package flexcoral.seedutils;
 
 import com.seedfinding.mccore.rand.ChunkRand;
-import com.seedfinding.mccore.util.pos.CPos;
 import com.seedfinding.mccore.version.MCVersion;
 import com.seedfinding.mcfeature.structure.UniformStructure;
 import meteordevelopment.meteorclient.utils.misc.ISerializable;
+import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import net.minecraft.nbt.NbtCompound;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
-import java.util.stream.Collectors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.LongStream;
-import java.util.stream.Stream;
 
 public class StructureLifting {
-    public static List<Long> crack(List<Data> dataList, MCVersion version) {
-        Stream<Long> lowerBitsStream = LongStream.range(0, 1L << 19).boxed().filter(lowerBits -> {
-            ChunkRand rand = new ChunkRand();
-            for (Data data : dataList) {
-                rand.setRegionSeed(lowerBits, data.regionX, data.regionZ, data.salt, version);
-                if (rand.nextInt(data.offset) % 4 != data.offsetX % 4 || rand.nextInt(data.offset) % 4 != data.offsetZ % 4) {
-                    return false;
-                }
-            }
-            return true;
-        });
+    public static CompletableFuture<long[]> crack(List<Data> dataList, MCVersion version, Progress progressCallback) {
+        return CompletableFuture.supplyAsync(() -> {
+            ThreadLocal<ChunkRand> threadLocal = ThreadLocal.withInitial(ChunkRand::new);
+            progressCallback.report(0d);
 
-        Stream<Long> seedStream = lowerBitsStream.flatMap(lowerBits ->
-            LongStream.range(0, 1L << (48 - 19))
-                .boxed()
-                .map(upperBits -> (upperBits << 19) | lowerBits)
-        );
-
-        Stream<Long> strutureSeedStream = seedStream.filter(seed -> {
-            ChunkRand rand = new ChunkRand();
-            for (Data data : dataList) {
-                rand.setRegionSeed(seed, data.regionX, data.regionZ, data.salt, version);
-                if (rand.nextInt(data.offset) != data.offsetX || rand.nextInt(data.offset) != data.offsetZ) {
-                    return false;
+            LongStream lowerBitsStream = LongStream.range(0, 1L << 19).filter(lowerBits -> {
+                ChunkRand rand = threadLocal.get();
+                for (Data data : dataList) {
+                    rand.setRegionSeed(lowerBits, data.regionX, data.regionZ, data.salt, version);
+                    if ((rand.nextInt(data.offset) & 3) != (data.offsetX & 3) || (rand.nextInt(data.offset) & 3) != (data.offsetZ & 3)) {
+                        return false;
+                    }
                 }
-            }
-            return true;
-        });
-        return strutureSeedStream.parallel().collect(Collectors.toList());
+                return true;
+            });
+
+            long[] lowerBits = lowerBitsStream.parallel().toArray();
+
+            // second step
+
+            long lowerBitsCount = lowerBits.length;
+            long progressBarUpdates = 1L << 4;
+            long progressUpdateMask = (1L << 25) - 1;
+            AtomicLong counter = new AtomicLong();
+
+            LongStream seedStream = LongStream.of(lowerBits).mapMulti((lowBits, consumer) -> {
+                for (long upperBits = 0; upperBits < (1L << 48 - 19); upperBits++) {
+                    consumer.accept((upperBits << 19) | lowBits);
+                }
+            });
+
+            LongStream structureSeedStream = seedStream.filter(seed -> {
+                // the rate at which progress updates are reported currently depends on 'lowerBitsCount'
+                // ideally 'progressBarUpdates' should change depending on 'lowerBitsCount'
+                if (((seed >> 19) & progressUpdateMask) == 0) {
+                    progressCallback.report((double) counter.incrementAndGet() / progressBarUpdates / lowerBitsCount);
+                }
+
+                ChunkRand rand = threadLocal.get();
+                for (Data data : dataList) {
+                    rand.setRegionSeed(seed, data.regionX, data.regionZ, data.salt, version);
+                    if (rand.nextInt(data.offset) != data.offsetX || rand.nextInt(data.offset) != data.offsetZ) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+
+            long[] crackedSeeds = structureSeedStream.parallel().toArray();
+            progressCallback.report(1d);
+            return crackedSeeds;
+        }, MeteorExecutor.executor);
+    }
+
+    @FunctionalInterface
+    public interface Progress {
+        void report(double progress);
     }
 
     public static class Data implements ISerializable<Data> {
