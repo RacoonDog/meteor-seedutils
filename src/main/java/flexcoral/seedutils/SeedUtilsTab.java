@@ -19,13 +19,16 @@ import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.gui.widgets.input.WDropdown;
 import meteordevelopment.meteorclient.gui.widgets.input.WIntEdit;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
-import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
+import meteordevelopment.meteorclient.utils.Utils;
+import meteordevelopment.meteorclient.utils.player.ChatUtils;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 
 import java.util.HashMap;
 import java.util.Map;
-
-import static com.seedfinding.mcfeature.structure.Structure.CLASS_TO_NAME;
+import java.util.concurrent.CompletableFuture;
 
 public class SeedUtilsTab extends Tab {
     public SeedUtilsTab() {
@@ -111,13 +114,34 @@ public class SeedUtilsTab extends Tab {
         public void fillLiftingSection(GuiTheme theme, WSection section) {
             WButton startBtn = section.add(theme.button("Start lifting")).expandX().widget();
             startBtn.action = () -> {
-                MeteorExecutor.execute(() -> {
-                    var seeds = StructureLifting.crack(SeedUtilsSystem.get().getAllStructureData().values().stream().toList(), MCVersion.v1_21);
-                    System.out.println("Finished");
-                    for (var s : seeds) {
-                        System.out.println(s);
+
+                startBtn.action = null; //fuck you
+
+                StructureLifting.Progress progressListener = progress -> MinecraftClient.getInstance().execute(() -> {
+                    if (Utils.canUpdate()) {
+                        MinecraftClient.getInstance().inGameHud.setOverlayMessage(Text.literal("Seed lifting is ")
+                            .append(Text.literal(String.format("%.1f%%", progress * 100)).formatted(Formatting.GREEN))
+                            .append(" done."), false);
                     }
                 });
+
+                CompletableFuture<long[]> seedFuture = StructureLifting.crack(SeedUtilsSystem.get().getAllStructureData().values().stream().toList(), MCVersion.v1_21, progressListener);
+
+                seedFuture.thenAcceptAsync(seeds -> {
+                    if (Utils.canUpdate()) {
+                        if (seeds.length == 0) {
+                            ChatUtils.infoPrefix("SeedUtils", "Seed cracking finished no seeds found.");
+                        } else {
+                            ChatUtils.infoPrefix("SeedUtils", "Seed cracking finished with (highlight)" + seeds.length + "(default) seeds:");
+                            for (int i = 0; i < Math.min(5, seeds.length); i++) {
+                                ChatUtils.info("- (highlight)" + seeds[i]);
+                            }
+                            if (seeds.length > 5) {
+                                ChatUtils.info("And " + (seeds.length - 5) + " more.");
+                            }
+                        }
+                    }
+                }, MinecraftClient.getInstance());
             };
         }
 
